@@ -10,6 +10,7 @@ const StudentWiseAttendance = require("../../models/StudentWiseAttendance");
 const Batch = require("../../models/Batch");
 const { GenerateRandomPwd, SendMail } = require("../../common/Common");
 const { isEmpty } = require("../../validations/is-empty");
+const fees = require("../../common/Fees");
 const {
   accountCreatedSub,
   accountCreatedBody,
@@ -127,13 +128,15 @@ router.post("/feepaid", (req, res) => {
     discount,
     scholarship,
     fine,
-    totalFee,
+    totalfee,
     dueDt,
     paidDt,
     paidMethod,
     txnId,
+    epochDueDt,
   } = req.body;
 
+  let isPaid = false;
   let validateFees = new ValidateStudentFees({
     sId,
     pId,
@@ -143,10 +146,12 @@ router.post("/feepaid", (req, res) => {
     discount,
     scholarship,
     fine,
-    totalFee,
+    totalFee: Number(totalfee),
     dueDt,
+    epochDueDt,
     paidDt,
     paidMethod,
+    isPaid,
     txnId,
   });
 
@@ -162,6 +167,9 @@ router.post("/feepaid", (req, res) => {
     .catch((err) => {
       res.status(400).json(errorMsg);
     });
+
+  //Store the fee paid dt in the fees hash we have.
+  fees.ChangeStudentFeePaidDt(sId, insId, bId, paidDt, epochDueDt);
 });
 
 //The API will be used to send the upcoming 3 classes of student
@@ -326,6 +334,21 @@ router.post("/attendance", (req, res) => {
   } else {
     //Query two collections based on year.
   }
+});
+
+//The API will used to fetch the transaction details of the parent
+router.post("/feetxndetails", (req, res) => {});
+
+//The API will be used by parent to fetch due fees details of
+//student.
+router.post("/getduefees", (req, res) => {
+  let { sId, insId } = req.body;
+  fees.FetchStudentWiseDueFees(sId, insId).then((data) => {
+    res.status(200).json({
+      flag: 1,
+      data: data,
+    });
+  });
 });
 
 const GetDay = (dayIndex) => {

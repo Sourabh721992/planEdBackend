@@ -4,39 +4,39 @@ const Schema = mongoose.Schema;
 // Create Schema
 const UserSchema = new Schema({
   nm: {
-    type: String
+    type: String,
   },
   cNo: {
     type: String,
-    required: true
+    required: true,
   },
   email: {
     type: String,
-    required: true
+    // required: true
   },
   isActive: {
     type: Boolean,
-    default: true
+    default: true,
   },
   addrs: {
-    type: String
+    type: String,
   },
   pwd: {
     type: String,
-    required: true
+    required: true,
   },
   role: {
     type: [String],
-    required: true
+    required: true,
   },
   cDt: {
     type: Number,
-    default: Math.trunc(Date.now() / 1000)
+    default: Math.trunc(Date.now() / 1000),
   },
   mDt: {
     type: Number,
-    default: Math.trunc(Date.now() / 1000)
-  }
+    default: Math.trunc(Date.now() / 1000),
+  },
 });
 
 module.exports = User = mongoose.model("user", UserSchema);

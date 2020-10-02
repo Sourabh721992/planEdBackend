@@ -28,6 +28,7 @@ const {
   teacherAddedToBatchSub,
   teacherAddedToBatchBody,
 } = require("../../common/EmailTemplate");
+const fees = require("../../common/Fees");
 
 //The API will be used by Admin to add batches
 //in the institute and map the same to teachers in the institute
@@ -2131,7 +2132,7 @@ router.post("/getstudentsforfees", (req, res) => {
         });
       } else {
         res.status(200).json({
-          flag: 1,
+          flag: 0,
           msg: "No such student exist",
         });
       }
@@ -2168,7 +2169,11 @@ router.post("/validatefeeinfo", (req, res) => {
     while (Number(totalMonths) >= m) {
       let objFee = {};
       objFee.feeDt =
-        dt.getDate() + "-" + (dt.getMonth() + 1) + "-" + dt.getFullYear();
+        ("0" + dt.getDate()).slice(-2) +
+        "-" +
+        ("0" + (dt.getMonth() + 1)).slice(-2) +
+        "-" +
+        dt.getFullYear();
       objFee.feeInstallment = Number(feeInstallment);
       objFee.feeDiscount = Math.trunc(
         (feeDiscount * objFee.feeInstallment) / 100
@@ -2190,7 +2195,11 @@ router.post("/validatefeeinfo", (req, res) => {
     while (Number(totalMonths) > m) {
       let objFee = {};
       objFee.feeDt =
-        dt.getDate() + "-" + (dt.getMonth() + 1) + "-" + dt.getFullYear();
+        ("0" + dt.getDate()).slice(-2) +
+        "-" +
+        ("0" + (dt.getMonth() + 1)).slice(-2) +
+        "-" +
+        dt.getFullYear();
       objFee.feeInstallment = Number(feeInstallment);
       objFee.feeDiscount = Math.trunc(
         (feeDiscount * objFee.feeInstallment) / 100
@@ -2208,7 +2217,11 @@ router.post("/validatefeeinfo", (req, res) => {
     //This is the case when installment amount will differ.
     let objFee = {};
     objFee.feeDt =
-      dt.getDate() + "-" + (dt.getMonth() + 1) + "-" + dt.getFullYear();
+      ("0" + dt.getDate()).slice(-2) +
+      "-" +
+      ("0" + (dt.getMonth() + 1)).slice(-2) +
+      "-" +
+      dt.getFullYear();
     objFee.feeInstallment = Math.trunc(
       (feeInstallment * (totalMonths % periodicMonths)) / periodicMonths
     );
@@ -2249,7 +2262,7 @@ router.post("/enterfeeinfo", (req, res) => {
   let arrDt = [];
 
   studentFeeInfo.map((feeInfo) => {
-    arrDt.push(feeInfo.feeDt.replace("-", "").replace("-", ""));
+    arrDt.push(feeInfo.feeDtEpoch);
   });
 
   let arrEpochDt = arrDt;
@@ -2486,10 +2499,27 @@ router.post("/approvefeeinfo", (req, res) => {
       bId,
       totalFee
     );
+
+    fees.RemoveStudentDueFees(
+      sId,
+      bId,
+      insId,
+      pId,
+      fee,
+      discount,
+      scholarship,
+      fine,
+      totalFee,
+      dueDt,
+      epochDueDt
+    );
   } else {
     //Admin is saying he hasn't received any fee, so he is rejecting the submit details.
     //Inform parents/students about the same.
     sts = 0;
+
+    //Change the paidDt in redis and internal DS
+    fees.ChangeStudentFeePaidDt(sId, insId, bId, -1, epochDueDt);
 
     res.status(200).json({
       flag: 1,
@@ -2533,41 +2563,21 @@ router.post("/approvefeeinfo", (req, res) => {
 
 //The API will be sending the details of students(fees delayed) to admin
 router.post("/getduefeedetails", (req, res) => {
-  //Right now I am hard coding the data, as this data will be cooked by job.
-  res.status(200).json({
-    flag: 1,
-    data: [
-      {
-        sId: "5e44f183b26a8736acda83fa",
-        sNm: "Student 1",
-        pId: "5e444553332ed10b4449459f",
-        sEmail: "sourabh.axestrack@gmail.com",
-        sCNo: "7703934715",
-        bId: "5e444d3f37d6f12430533cf9",
-        bNm: "Batch 1 - Maths",
-        fee: 2300,
-        discount: 230,
-        scholarship: 0,
-        fine: 0,
-        totalFee: 2070,
-        dueDt: "1-7-2019",
-      },
-      {
-        sId: "5e44f259f053cf3d2c889de4",
-        sNm: "Student 2",
-        pId: "5e444553332ed10b4449459f",
-        sEmail: "sourabh.axestrack@gmail.com",
-        sCNo: "7703934716",
-        bId: "5e444d3f37d6f12430533cf9",
-        bNm: "Batch 1 - Maths",
-        fee: 2300,
-        discount: 230,
-        scholarship: 0,
-        fine: 0,
-        totalFee: 2070,
-        dueDt: "1-10-2019",
-      },
-    ],
+  fees.FetchInstiWiseDueFees(req.body.insId).then((data) => {
+    //convert epoch datetime to dd-mm-yyyy format
+    // data.map((d) => {
+    //   let dt = new Date(Number(d.dueDt) * 1000);
+    //   d.dueDt =
+    //     ("0" + dt.getDate()).slice(-2) +
+    //     "-" +
+    //     ("0" + (dt.getMonth() + 1)).slice(-2) +
+    //     "-" +
+    //     dt.getFullYear();
+    // });
+    res.status(200).json({
+      flag: 1,
+      data: data,
+    });
   });
 });
 
@@ -2617,6 +2627,20 @@ router.post("/approveduefees", (req, res) => {
     });
   });
 
+  fees.RemoveStudentDueFees(
+    sId,
+    bId,
+    insId,
+    pId,
+    fee,
+    discount,
+    scholarship,
+    fine,
+    totalFee,
+    dueDt,
+    epochDueDt
+  );
+
   //Add txn details in fee txn details collection
   const feeTxnDetails = new FeeTxnDetails({
     sId,
@@ -2650,6 +2674,8 @@ router.post("/approveduefees", (req, res) => {
     bId,
     totalFee
   );
+
+  //Update the internel Fee DS and DS in redis.
 });
 
 //The API is responsible for preparing the dashboard data of the

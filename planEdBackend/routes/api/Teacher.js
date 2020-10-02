@@ -26,6 +26,7 @@ const InputStudentFees = require("../../models/InputStudentFees");
 const UpdatedBatchTimings = require("../../models/UpdatedBatchTimings");
 const BatchWiseMessage = require("../../models/BatchWiseMessage");
 const LiveSession = require("../../models/LiveSession");
+const LastAttendedClass = require("../../models/LastAttendedClass");
 
 const {
   studentAddedToBatchSub,
@@ -174,6 +175,7 @@ router.post("/attendance", (req, res) => {
         studentAttendanceDetails.map((s) => (mapStudent[s.sId] = s));
 
       let bulk = StudentWiseAttendance.collection.initializeUnorderedBulkOp();
+      let bulkLastAttendedClass = LastAttendedClass.collection.initializeUnorderedBulkOp();
       let executeBulk = false;
       for (let s = 0; s < students.length; s++) {
         //No attendance entry for institute, year exist for this student.
@@ -273,6 +275,18 @@ router.post("/attendance", (req, res) => {
             });
           executeBulk = true;
         }
+
+        //Record the last attended class of the student
+        if (students[s].a == 1) {
+          GetCurrentDate().then((dt) => {
+            bulkLastAttendedClass.insert({
+              insId: insId,
+              sId: students[s].sId,
+              bId: bId,
+              classDt: Math.trunc(dt.getTime() / 1000),
+            });
+          });
+        }
       }
 
       if (executeBulk) {
@@ -289,6 +303,15 @@ router.post("/attendance", (req, res) => {
             res.status(200).json(errorMsg);
           });
       }
+
+      LastAttendedClass.deleteMany({
+        insId: insId,
+        sId: { $in: arrStudentIds },
+      }).then((response) => {
+        bulkLastAttendedClass.execute().catch((err) => {
+          console.log(err);
+        });
+      });
 
       //1. Feeds the student information in the database and maintain state in the local machine --end
 
@@ -775,6 +798,8 @@ router.post("/syllabus", (req, res) => {
           subtopic: topic,
           description: description,
           tId: tId,
+          chptrDone: chapterDone,
+          test: isTest == 1 ? true : false,
         },
       },
     },
@@ -1419,7 +1444,9 @@ var storage = multer.diskStorage({
   },
 });
 
-var upload = multer({ storage: storage, limits: { fileSize: 10485760 } });
+// var upload = multer({ storage: storage, limits: { fileSize: 10485760 } });
+
+var upload = multer({ storage: storage });
 
 //This part is used to upload content file and store content info in batch wise
 //content collection

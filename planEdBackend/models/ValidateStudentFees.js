@@ -8,60 +8,63 @@ const ValidateStudentFeesSchema = new Schema({
   sId: {
     type: Schema.Types.ObjectId,
     ref: "user",
-    required: true
+    required: true,
   },
   pId: {
     type: Schema.Types.ObjectId,
     ref: "user",
-    required: true
+    required: true,
   },
   insId: {
     type: Schema.Types.ObjectId,
     ref: "institute",
-    required: true
+    required: true,
   },
   bId: {
     type: Schema.Types.ObjectId,
     ref: "batch",
-    required: true
+    required: true,
   },
   fee: {
     type: Number,
-    required: true
+    required: true,
   },
   discount: {
     type: Number,
-    default: 0
+    default: 0,
   },
   scholarship: {
     type: Number,
-    default: 0
+    default: 0,
   },
   fine: {
     type: Number,
-    default: 0
+    default: 0,
   },
   totalFee: {
-    type: Number
+    type: Number,
   },
   dueDt: {
-    type: String
+    type: String,
+  },
+  epochDueDt: {
+    type: Number,
   },
   paidDt: {
-    type: String // will be a datetime
+    type: String, // will be a datetime
   },
   paidMethod: {
     type: String,
-    default: " "
+    default: " ",
   },
   isPaid: {
     type: Boolean,
-    default: true
+    default: true,
   },
   txnId: {
     type: String,
-    default: " "
-  }
+    default: " ",
+  },
 });
 
 module.exports = ValidateStudentFees = mongoose.model(

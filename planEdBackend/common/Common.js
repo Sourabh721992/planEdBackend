@@ -34,13 +34,13 @@ module.exports.SendMail = (to, subject, body) => {
     let transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
-        user: "mohitpsingh191995@gmail.com",
-        pass: "momo@1995",
+        user: "noreply.planed@gmail.com",
+        pass: "planEd34194pWQ@419",
       },
     });
 
     let mailOptions = {
-      from: "mohitpsingh191995@gmail.com",
+      from: "noreply.planed@gmail.com",
       to: to,
       subject: subject,
       html: body,

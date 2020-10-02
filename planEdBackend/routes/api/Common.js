@@ -1,6 +1,7 @@
 const express = require("express");
 const { errorMsg } = require("../../config/keys");
 const { GetCurrentDate } = require("../../common/Common");
+const { RegisterForNotification } = require("../../common/Fcm");
 const router = express.Router();
 const Institute = require("../../models/Institute");
 const School = require("../../models/Schools");
@@ -9,6 +10,7 @@ const Class = require("../../models/Class");
 const BatchWiseMessage = require("../../models/BatchWiseMessage");
 const LiveSession = require("../../models/LiveSession");
 const Query = require("../../models/Query");
+const Admin = require("../../models/Admin");
 
 //The API will send the institute registered with our system.
 router.post("/insti", (req, res) => {
@@ -467,10 +469,10 @@ router.post("/livesession", (req, res) => {
     GetCurrentDate().then((dt) => {
       let nowEpochSec = Math.trunc(new Date().getTime() / 1000) + 330 * 60;
       let dt12Am = nowEpochSec - (nowEpochSec % 86400);
-      console.log(dt12Am);
+      // console.log(dt12Am);
       LiveSession.find({
         tId: tId,
-        dt: { $gt: Math.trunc(dt12Am.getTime() / 1000) },
+        dt: { $gt: dt12Am },
       }).then((liveSession) => {
         let arrWebObj = [];
         for (let l = 0; l < liveSession.length; l++) {
@@ -508,7 +510,7 @@ router.post("/livesession", (req, res) => {
             let dt12Am = nowEpochSec - (nowEpochSec % 86400);
             LiveSession.find({
               bId: { $in: arrBatchIds },
-              dt: { $gt: Math.trunc(dt12Am.getTime() / 1000) },
+              dt: { $gt: dt12Am },
             }).then((liveSession) => {
               let arrLiveSession = [];
               for (let l = 0; l < liveSession.length; l++) {
@@ -534,6 +536,23 @@ router.post("/livesession", (req, res) => {
       });
     });
   }
+});
+
+router.post("/registerdevicefornotification", (req, res) => {
+  let { uId, fcmid, imei, platform, version, versionNo } = req.body;
+  RegisterForNotification(uId, fcmid, imei, platform, version, versionNo)
+    .then((msg) => {
+      res.status(200).json({
+        flag: 1,
+        msg: msg,
+      });
+    })
+    .catch((err) => {
+      res.status(200).json({
+        flag: 0,
+        msg: msg,
+      });
+    });
 });
 
 router.post("/query", (req, res) => {
@@ -581,7 +600,33 @@ router.post("/downloadcontent", (req, res) => {
 router.post("/profile", (req, res) => {
   let { uId, role } = req.body;
   if (role == "a") {
-    //uild Admin Profile
+    //Load Admin Profile
+    Admin.findOne({ aId: uId })
+      .populate("aId", "nm cNo email addrs cDt -_id")
+      .populate("insti", "nm teachers")
+      .then((adminDetails) => {
+        let adminObject = {};
+        adminObject["nm"] = adminDetails.aId.nm;
+        adminObject["cNo"] = adminDetails.aId.cNo;
+        adminObject["email"] = adminDetails.aId.email;
+        adminObject["sDt"] = adminDetails.aId.cDt;
+        adminObject["insNm"] = adminDetails.insti.nm;
+        adminObject["tCnt"] = adminDetails.insti[0].teachers.length;
+        adminObject["sCnt"] = 0;
+        //Get the batch details of the institute
+        Batch.find({
+          insti: adminDetails.insti[0]._id,
+        }).then((batchDetails) => {
+          adminObject["bCnt"] = batchDetails.length;
+          for (let b = 0; b < batchDetails.length; b++) {
+            adminObject["sCnt"] += Number(batchDetails[b].student.length);
+          }
+          res.json({
+            flag: 1,
+            data: adminObject,
+          });
+        });
+      });
   }
 });
 

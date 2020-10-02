@@ -31,6 +31,14 @@ const BatchActivityTrackerSchema = new Schema({
       description: {
         type: String,
       },
+      chptrDone: {
+        type: Boolean,
+        default: false,
+      },
+      test: {
+        type: Boolean,
+        default: false,
+      },
       tId: {
         type: Schema.Types.ObjectId,
         ref: "user",

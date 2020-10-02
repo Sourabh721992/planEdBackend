@@ -3,6 +3,10 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 
 const { errorMsg } = require("../../config/keys");
+const {
+  SaveUserFcmIds,
+  DeregisterForNotification,
+} = require("../../common/Fcm");
 const UserOTPSchema = require("../../models/UserOTP");
 //const { validateRegisterInput } = require("../../validations/User");
 const {
@@ -18,6 +22,8 @@ const Institute = require("../../models/Institute");
 const Batch = require("../../models/Batch");
 const Admin = require("../../models/Admin");
 const LiveSession = require("../../models/LiveSession");
+const redis = require("../../common/RedisLayer");
+const { ParentDashboardData } = require("../../config/keys");
 const {
   registrationOtpBody,
   registrationOtpSub,
@@ -263,6 +269,15 @@ router.post("/login", (req, res) => {
               data: user.role,
             });
           }
+          //Register FCM Id in internal DS and store the same in mongo Db
+          SaveUserFcmIds(
+            user._id,
+            req.body.fcmid,
+            req.body.imei,
+            req.body.platform,
+            req.body.version,
+            req.body.versionNo
+          );
         } else {
           res.status(200).json({
             flag: 0,
@@ -276,6 +291,15 @@ router.post("/login", (req, res) => {
         msg: "Request you to signup.",
       });
     }
+  });
+});
+
+router.post("/logout", (req, res) => {
+  let { uId, role, fcmid, platform } = req.body;
+  DeregisterForNotification(uId, platform, fcmid);
+  res.status(200).json({
+    flag: 1,
+    msg: "Done",
   });
 });
 
@@ -338,16 +362,29 @@ router.post("/rolelogin", (req, res) => {
 //He will send institute Id and  parent Id and we will fetch
 //the dashboard data.
 router.post("/parents/ins", (req, res) => {
-  User.findOne({ _id: req.body.pId })
-    .then((parent) => {
-      GetParentDashboardData(parent, req.body.insId).then((response) => {
-        res.status(200).json(response);
+  //Get parent Dashboard data from redis
+  redis.FetchHashSetFields(
+    "redisClient6001",
+    ParentDashboardData.replace("insId", req.body.insId),
+    req.body.pId,
+    function (studentInfo) {
+      consoel.log(JSON > parse(studentInfo));
+      res.status(200).json({
+        flag: 1,
+        data: JSON.parse(studentInfo),
       });
-    })
-    .catch((err) => {
-      console.log(err);
-      res.status(200).json(errorMsg);
-    });
+    }
+  );
+  // User.findOne({ _id: req.body.pId })
+  //   .then((parent) => {
+  //     GetParentDashboardData(parent, req.body.insId).then((response) => {
+  //       res.status(200).json(response);
+  //     });
+  //   })
+  //   .catch((err) => {
+  //     console.log(err);
+  //     res.status(200).json(errorMsg);
+  //   });
 });
 
 //The API will be hit by teacher in case of multiple institutes
@@ -488,6 +525,37 @@ router.post("/web/teachers/ins", (req, res) => {
           }
         }
       });
+    })
+    .catch((err) => {
+      console.log(err);
+      res.status(200).json(errorMsg);
+    });
+});
+
+//The API will be hit by admin when he/she will login from web.
+router.post("/web/admins/ins", (req, res) => {
+  let resObj = {};
+
+  User.findOne({ _id: req.body.aId })
+    .then((adminBasicDetails) => {
+      resObj["aId"] = req.body.aId;
+      resObj["aNm"] = adminBasicDetails.nm;
+      resObj["role"] = adminBasicDetails.role.join(",");
+
+      Admin.findOne({ aId: req.body.aId })
+        .populate("insti", "nm _id")
+        .then((adminInstiDetails) => {
+          for (let i = 0; i < adminInstiDetails.insti.length; i++) {
+            resObj["instiId"] = adminInstiDetails.insti[i]._id;
+            resObj["instiNm"] = adminInstiDetails.insti[i].nm;
+            break;
+          }
+
+          res.status(200).json({
+            flag: 1,
+            data: resObj,
+          });
+        });
     })
     .catch((err) => {
       console.log(err);
@@ -684,98 +752,111 @@ router.post("/forgetpasswordotp", (req, res) => {
   User.findOne({ cNo: req.body.cNo })
     .then((user) => {
       if (user) {
-        ForgetPassword.findOne({ cNo: req.body.cNo })
-          .then((pwdDetails) => {
-            if (pwdDetails) {
-              if (Math.trunc(Date.now() / 1000) - pwdDetails.dt > 180) {
+        if (user.email === "email") {
+          res.json({
+            flag: 0,
+            msg: "Email not present.",
+          });
+        } else {
+          ForgetPassword.findOne({ cNo: req.body.cNo })
+            .then((pwdDetails) => {
+              if (pwdDetails) {
+                if (Math.trunc(Date.now() / 1000) - pwdDetails.dt > 180) {
+                  //User is found in the system, generate the otp and send the mail to user.
+                  GenerateOTP().then((OTP) => {
+                    //Save the OTP details in the system and then send the mail to user
+                    ForgetPassword.findOneAndUpdate(
+                      { cNo: pwdDetails.cNo },
+                      { $set: { dt: Math.trunc(Date.now() / 1000), otp: OTP } },
+                      { new: true }
+                    ).then((otpDetails) => {
+                      //Send mail to user
+                      SendMail(
+                        user.email,
+                        forgetPasswordOtpSub,
+                        forgetPasswordOtpBody.replace(
+                          "#OTPValue",
+                          otpDetails.otp
+                        )
+                      )
+                        .then((data) => {
+                          res.status(200).json({
+                            flag: 1,
+                            id: otpDetails._id,
+                            msg: "OTP sent successfully",
+                          });
+                        })
+                        .catch((err) => {
+                          console.log(err);
+                          res.status(200).json(errorMsg);
+                        });
+                    });
+                  });
+                } else {
+                  SendMail(
+                    user.email,
+                    forgetPasswordOtpSub,
+                    forgetPasswordOtpBody.replace("#OTPValue", pwdDetails.otp)
+                  )
+                    .then((data) => {
+                      res.status(200).json({
+                        flag: 1,
+                        id: pwdDetails._id,
+                        msg: "OTP sent successfully",
+                      });
+                    })
+                    .catch((err) => {
+                      console.log(err);
+                      res.status(200).json(errorMsg);
+                    });
+                }
+              } else {
                 //User is found in the system, generate the otp and send the mail to user.
                 GenerateOTP().then((OTP) => {
                   //Save the OTP details in the system and then send the mail to user
-                  ForgetPassword.findOneAndUpdate(
-                    { cNo: pwdDetails.cNo },
-                    { $set: { dt: Math.trunc(Date.now() / 1000), otp: OTP } },
-                    { new: true }
-                  ).then((otpDetails) => {
-                    //Send mail to user
-                    SendMail(
-                      user.email,
-                      forgetPasswordOtpSub,
-                      forgetPasswordOtpBody.replace("#OTPValue", otpDetails.otp)
-                    )
-                      .then((data) => {
-                        res.status(200).json({
-                          flag: 1,
-                          id: otpDetails._id,
-                          msg: "OTP sent successfully",
-                        });
-                      })
-                      .catch((err) => {
-                        console.log(err);
-                        res.status(200).json(errorMsg);
-                      });
+                  const forgetPasswordOTP = new ForgetPassword({
+                    cNo: req.body.cNo,
+                    otp: OTP,
+                    email: user.email,
+                    dt: Math.trunc(Date.now() / 1000),
                   });
-                });
-              } else {
-                SendMail(
-                  user.email,
-                  forgetPasswordOtpSub,
-                  forgetPasswordOtpBody.replace("#OTPValue", pwdDetails.otp)
-                )
-                  .then((data) => {
-                    res.status(200).json({
-                      flag: 1,
-                      id: pwdDetails._id,
-                      msg: "OTP sent successfully",
-                    });
-                  })
-                  .catch((err) => {
-                    console.log(err);
-                    res.status(200).json(errorMsg);
-                  });
-              }
-            } else {
-              //User is found in the system, generate the otp and send the mail to user.
-              GenerateOTP().then((OTP) => {
-                //Save the OTP details in the system and then send the mail to user
-                const forgetPasswordOTP = new ForgetPassword({
-                  cNo: req.body.cNo,
-                  otp: OTP,
-                  email: user.email,
-                  dt: Math.trunc(Date.now() / 1000),
-                });
 
-                forgetPasswordOTP
-                  .save()
-                  .then((otpDetails) => {
-                    //Send mail to user
-                    SendMail(
-                      user.email,
-                      forgetPasswordOtpSub,
-                      forgetPasswordOtpBody.replace("#OTPValue", otpDetails.otp)
-                    )
-                      .then((data) => {
-                        res.status(200).json({
-                          flag: 1,
-                          id: otpDetails._id,
-                          msg: "OTP sent successfully",
+                  forgetPasswordOTP
+                    .save()
+                    .then((otpDetails) => {
+                      //Send mail to user
+                      SendMail(
+                        user.email,
+                        forgetPasswordOtpSub,
+                        forgetPasswordOtpBody.replace(
+                          "#OTPValue",
+                          otpDetails.otp
+                        )
+                      )
+                        .then((data) => {
+                          res.status(200).json({
+                            flag: 1,
+                            id: otpDetails._id,
+                            msg: "OTP sent successfully",
+                          });
+                        })
+                        .catch((err) => {
+                          console.log(err);
+                          res.status(200).json(errorMsg);
                         });
-                      })
-                      .catch((err) => {
-                        console.log(err);
-                        res.status(200).json(errorMsg);
-                      });
-                  })
-                  .catch((err) => {
-                    console.log(err);
-                    res.status(200).json(errorMsg);
-                  });
-              });
-            }
-          })
-          .catch((err) => {
-            console.log(err);
-            res.status(200).json(errorMsg);
-          });
+                    })
+                    .catch((err) => {
+                      console.log(err);
+                      res.status(200).json(errorMsg);
+                    });
+                });
+              }
+            })
+            .catch((err) => {
+              console.log(err);
+              res.status(200).json(errorMsg);
+            });
+        }
       } else {
         res.status(200).json({
           flag: 0,
@@ -787,6 +868,22 @@ router.post("/forgetpasswordotp", (req, res) => {
     .catch((err) => {
       console.log(err);
       res.status(200).json(errorMsg);
+    });
+});
+
+//The API will be used by user to update email Address
+router.post("/updateemail", (req, res) => {
+  let { cNo, email } = req.body;
+
+  User.findOneAndUpdate({ cNo: cNo }, { $set: { email: email } })
+    .then((respnse) => {
+      res.json({
+        flag: 1,
+        msg: "Email Address updated successfully.",
+      });
+    })
+    .catch((err) => {
+      res.json(errorMsg);
     });
 });
 
@@ -923,7 +1020,6 @@ const GetParentDashboardData = (parentDetails, insId = "-1") => {
                 },
                 batches: [
                   { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Maths" },
-                  { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Maths" },
                 ],
                 attendance: 70,
                 notifCnt: 21,
@@ -968,38 +1064,37 @@ const GetParentDashboardData = (parentDetails, insId = "-1") => {
                 },
               },
               {
-                sId: "5e44f183b26a8736acda83fa",
-                sNm: "Student 1",
-                lstAttended: "23 - Oct - 2019",
+                sId: "5e44f259f053cf3d2c889de4",
+                sNm: "Student 2",
+                lstAttended: "21 - July - 2020",
                 badges: {
                   Maths: "S",
-                  Science: "N",
-                  SST: "G",
+                  Chemistry: "N",
+                  Physics: "G",
                   Attendance: "B",
                 },
                 batches: [
-                  { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Maths" },
-                  { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Maths" },
+                  { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Physics" },
                 ],
-                attendance: 70,
-                notifCnt: 21,
-                nextCls: "Science",
+                attendance: 100,
+                notifCnt: 0,
+                nextCls: "Chemistry",
                 fee: {
-                  lstDt: "01 - Sep - 2019",
+                  lstDt: "01 - Mar - 2020",
                   lstMethod: "PayTm",
-                  dueDt: "01 - Oct - 2019",
-                  dueMethod: "PayTm/Cash/Other",
+                  dueDt: "01 - Aug - 2020",
+                  dueMethod: "Cash",
                 },
                 result: {
-                  Maths: 80,
-                  Science: 40,
-                  SST: 95,
-                  Attendance: 70,
+                  Maths: 90,
+                  Physics: 88,
+                  Chemistry: 95,
+                  Attendance: 100,
                 },
                 graph1: {
                   Maths: [80, 100, "26 - Oct - 2010"],
-                  Science: [40, 100, "26 - Oct - 2019"],
-                  SST: [95, 95, "26 - Oct - 2019"],
+                  Physics: [40, 100, "26 - Oct - 2019"],
+                  Chemistry: [95, 95, "26 - Oct - 2019"],
                 },
                 graph2: {
                   Maths: [
@@ -1007,14 +1102,14 @@ const GetParentDashboardData = (parentDetails, insId = "-1") => {
                     { "24 - Oct - 2019": 70 },
                     { "26 - Oct - 2019": 80 },
                   ],
-                  Science: [
-                    { "10 - Oct - 2019": 30 },
-                    { "15 - Oct - 2019": 60 },
+                  Physics: [
+                    { "10 - Oct - 2019": 100 },
+                    { "15 - Oct - 2019": 90 },
                     { "20 - Oct - 2019": 50 },
-                    { "25 - Oct - 2019": 20 },
-                    { "30 - Oct - 2019": 40 },
+                    { "25 - Oct - 2019": 70 },
+                    { "30 - Oct - 2019": 80 },
                   ],
-                  SST: [
+                  Chemistry: [
                     { "10 - Oct - 2019": 90 },
                     { "15 - Oct - 2019": 93 },
                     { "20 - Oct - 2019": 97 },
@@ -1082,7 +1177,6 @@ const GetParentDashboardData = (parentDetails, insId = "-1") => {
                 },
                 batches: [
                   { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Maths" },
-                  { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Maths" },
                 ],
                 attendance: 70,
                 notifCnt: 21,
@@ -1127,38 +1221,37 @@ const GetParentDashboardData = (parentDetails, insId = "-1") => {
                 },
               },
               {
-                sId: "5e44f183b26a8736acda83fa",
-                sNm: "Student 1",
-                lstAttended: "23 - Oct - 2019",
+                sId: "5e44f259f053cf3d2c889de4",
+                sNm: "Student 2",
+                lstAttended: "21 - July - 2020",
                 badges: {
                   Maths: "S",
-                  Science: "N",
-                  SST: "G",
+                  Chemistry: "N",
+                  Physics: "G",
                   Attendance: "B",
                 },
                 batches: [
-                  { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Maths" },
-                  { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Maths" },
+                  { bId: "5e444d3f37d6f12430533cf9", nm: "Batch 1 - Physics" },
                 ],
-                attendance: 70,
-                notifCnt: 21,
-                nextCls: "Science",
+                attendance: 100,
+                notifCnt: 0,
+                nextCls: "Chemistry",
                 fee: {
-                  lstDt: "01 - Sep - 2019",
+                  lstDt: "01 - Mar - 2020",
                   lstMethod: "PayTm",
-                  dueDt: "01 - Oct - 2019",
-                  dueMethod: "PayTm/Cash/Other",
+                  dueDt: "01 - Aug - 2020",
+                  dueMethod: "Cash",
                 },
                 result: {
-                  Maths: 80,
-                  Science: 40,
-                  SST: 95,
-                  Attendance: 70,
+                  Maths: 90,
+                  Physics: 88,
+                  Chemistry: 95,
+                  Attendance: 100,
                 },
                 graph1: {
                   Maths: [80, 100, "26 - Oct - 2010"],
-                  Science: [40, 100, "26 - Oct - 2019"],
-                  SST: [95, 95, "26 - Oct - 2019"],
+                  Physics: [40, 100, "26 - Oct - 2019"],
+                  Chemistry: [95, 95, "26 - Oct - 2019"],
                 },
                 graph2: {
                   Maths: [
@@ -1166,14 +1259,14 @@ const GetParentDashboardData = (parentDetails, insId = "-1") => {
                     { "24 - Oct - 2019": 70 },
                     { "26 - Oct - 2019": 80 },
                   ],
-                  Science: [
-                    { "10 - Oct - 2019": 30 },
-                    { "15 - Oct - 2019": 60 },
+                  Physics: [
+                    { "10 - Oct - 2019": 100 },
+                    { "15 - Oct - 2019": 90 },
                     { "20 - Oct - 2019": 50 },
-                    { "25 - Oct - 2019": 20 },
-                    { "30 - Oct - 2019": 40 },
+                    { "25 - Oct - 2019": 70 },
+                    { "30 - Oct - 2019": 80 },
                   ],
-                  SST: [
+                  Chemistry: [
                     { "10 - Oct - 2019": 90 },
                     { "15 - Oct - 2019": 93 },
                     { "20 - Oct - 2019": 97 },
