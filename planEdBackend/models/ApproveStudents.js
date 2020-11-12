@@ -8,27 +8,32 @@ const ApproveStudentsSchema = new Schema({
   sId: {
     type: Schema.Types.ObjectId,
     ref: "user",
-    required: true
+    required: true,
   },
   pId: {
     type: Schema.Types.ObjectId,
     ref: "user",
-    required: true
+    required: true,
   },
   insId: {
     type: Schema.Types.ObjectId,
     ref: "institute",
-    required: true
+    required: true,
   },
   bId: {
     type: Schema.Types.ObjectId,
     ref: "batch",
-    required: true
+    required: true,
+  },
+  tId: {
+    type: Schema.Types.ObjectId,
+    ref: "user",
+    required: true,
   },
   dt: {
     type: Number,
-    default: Math.trunc(Date.now() / 1000)
-  }
+    default: Math.trunc(Date.now() / 1000),
+  },
 });
 
 module.exports = ApproveStudents = mongoose.model(

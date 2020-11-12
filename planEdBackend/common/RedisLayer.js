@@ -44,7 +44,7 @@ redisClient6002.on("error", function (err) {
   console.log("[" + new Date().toLocaleString() + "]  BC! f****d Up" + err);
 });
 
-module.exports.CheckKeyExists = (redisKey, cb) => {
+module.exports.CheckKeyExists = (redisClient, redisKey, cb) => {
   redisClient6001.exists(redisKey, function (err, obj) {
     if (!err) {
       return cb(obj);
@@ -82,6 +82,41 @@ module.exports.SetHashSetInRedis = (
   if (redisClient == "redisClient6002") {
     redisClient6002.hmset(hashKey, hashField, hashVal);
   } else redisClient6001.hmset(hashKey, hashField, hashVal);
+};
+
+module.exports.HashSetFieldExistOrNot = (
+  redisClient,
+  hashkey,
+  hashField,
+  cb
+) => {
+  if (redisClient == "redisClient6002") {
+    redisClient6002.hexists(hashkey, hashField, function (err, obj) {
+      if (!err) {
+        return cb(obj);
+      } else {
+        console.log(
+          "[" +
+            new Date().toLocaleString() +
+            "]  HashSetFieldExistOrNot: " +
+            err
+        );
+      }
+    });
+  } else {
+    redisClient6001.hexists(hashkey, hashField, function (err, obj) {
+      if (!err) {
+        return cb(obj);
+      } else {
+        console.log(
+          "[" +
+            new Date().toLocaleString() +
+            "]  HashSetFieldExistOrNot: " +
+            err
+        );
+      }
+    });
+  }
 };
 
 //The function will fetch the hash fields data

@@ -8,5 +8,9 @@ module.exports = {
   },
   RedisKeyGetAllInstiIds: "allInstiIDs",
   RedisKeyInstiWiseDueFees: "InstiDueFees: insId",
-  ParentDashboardData: "ParentDashBoardData: insId",
+  RedisKeyParentDashboardData: "ParentDashBoardData: insId",
+  RedisKeyTeacherDashboardData: "TeacherDashBoardData: insId",
+  RedisKeyAdminDashboardData: "AdminDashBoardData: insId",
+  RedisKeyTeacherVerifyStudent: "ApproveStudent",
+  RedisKeyStudentParentMapping: "SID_PID",
 };

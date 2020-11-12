@@ -29,6 +29,7 @@ const {
   teacherAddedToBatchBody,
 } = require("../../common/EmailTemplate");
 const fees = require("../../common/Fees");
+const fcm = require("../../common/Fcm");
 
 //The API will be used by Admin to add batches
 //in the institute and map the same to teachers in the institute
@@ -192,15 +193,26 @@ router.post("/addbatch", (req, res) => {
               .then((teacher) => {
                 User.findOne({ _id: tId })
                   .then((user) => {
-                    SendMail(
-                      user.email,
-                      teacherAddedToBatchSub
-                        .replace("#Batch", nm)
-                        .replace("#Insti", insNm),
-                      teacherAddedToBatchBody
-                        .replace("#Batch", nm)
-                        .replace("#Insti", insNm)
-                        .replace("#Admin", adminNm)
+                    // SendMail(
+                    //   user.email,
+                    //   teacherAddedToBatchSub
+                    //     .replace("#Batch", nm)
+                    //     .replace("#Insti", insNm),
+                    //   teacherAddedToBatchBody
+                    //     .replace("#Batch", nm)
+                    //     .replace("#Insti", insNm)
+                    //     .replace("#Admin", adminNm)
+                    // );
+                    fcm.sendNotification(
+                      tId,
+                      "Assigned Batch",
+                      "You have been assigned batch, " +
+                        nm +
+                        " in institute, " +
+                        insNm +
+                        " by " +
+                        adminNm,
+                      "N0002"
                     );
                   })
                   .catch((err) => console.log(err));
@@ -320,6 +332,8 @@ router.post("/updatebatch", (req, res) => {
     arrFeePlans = JSON.parse(req.body.arrFeePlans);
   }
 
+  bNm = req.body.bNm;
+
   //Admin decided to update the subject of the batch
   if (arrSub.length > 0) updateParams["sub"] = arrSub;
 
@@ -380,6 +394,12 @@ router.post("/updatebatch", (req, res) => {
           validationMethodExecutedCount++;
           updateParams["timings"] = timings;
           //Send mail to teacher as well informing him/her about the updated timings.
+          fcm.sendNotification(
+            tId,
+            "Timings Updated",
+            "Timings of batch, " + bNm + " has been updated",
+            "N0007"
+          );
           if (errors.length == 0) {
             if (noOfValidationMethodCount == validationMethodExecutedCount) {
               Batch.updateOne({ _id: bId }, updateParams, {}).then(
@@ -417,6 +437,13 @@ router.post("/updatebatch", (req, res) => {
       .then((response) => {
         validationMethodExecutedCount++;
         updateParams["nm"] = nm;
+
+        fcm.sendNotification(
+          tId,
+          "Batch Name Updated",
+          "Batch Name, " + bNm + " has been changed to " + nm,
+          "N0008"
+        );
 
         if (errors.length == 0) {
           if (noOfValidationMethodCount == validationMethodExecutedCount) {
@@ -1599,8 +1626,15 @@ router.post("/plupdate", (req, res) => {
 router.post("/broadcast", (req, res) => {
   let { msg, teachers, adminNm, adminId, insNm } = req.body;
   //will write the logic of broadcasting to msgs to teachers -- here
-
-  console.log(req.body);
+  for (let t = 0; t < teachers.length; t++) {
+    fcm.sendNotification(teachers[t].tId, "Urgent Message", msg, "N0003");
+  }
+  fcm.sendNotification(
+    adminId,
+    "Broadcast Message",
+    "Message sent successfully to teachers",
+    "N0004"
+  );
 
   //Send to the teacher present in the sIds array
   res.status(200).json({
@@ -1707,15 +1741,38 @@ const UnlinkTeacherFromBatch = (
               .then((teacher) => {
                 User.findOne({ _id: tId })
                   .then((user) => {
-                    SendMail(
-                      user.email,
-                      teacherAddedToBatchSub
-                        .replace("#Batch", bNm)
-                        .replace("#Insti", insNm),
-                      teacherAddedToBatchBody
-                        .replace("#Batch", bNm)
-                        .replace("#Insti", insNm)
-                        .replace("#Admin", adminNm)
+                    // SendMail(
+                    //   user.email,
+                    //   teacherAddedToBatchSub
+                    //     .replace("#Batch", bNm)
+                    //     .replace("#Insti", insNm),
+                    //   teacherAddedToBatchBody
+                    //     .replace("#Batch", bNm)
+                    //     .replace("#Insti", insNm)
+                    //     .replace("#Admin", adminNm)
+                    // );
+                    fcm.sendNotification(
+                      tId,
+                      "Assigned Batch",
+                      "You have been assigned batch, " +
+                        bNm +
+                        " in institute, " +
+                        insNm +
+                        " by " +
+                        adminNm,
+                      "N0002"
+                    );
+
+                    fcm.sendNotification(
+                      tId,
+                      "Removed from Batch",
+                      "You have been removed from batch, " +
+                        bNm +
+                        " in institute, " +
+                        insNm +
+                        " by " +
+                        adminNm,
+                      "N0006"
                     );
                   })
                   .catch((err) => console.log(err));
@@ -1927,12 +1984,21 @@ router.post("/addteachers", (req, res) => {
                     )
                       .then((institute) => {
                         //Send the mail to teacher informing her about the addition in intitute.
-                        SendMail(
-                          user.email,
-                          teacherAddedSub.replace("#Insti", insNm),
-                          teacherAddedBody
-                            .replace("#Insti", insNm)
-                            .replace("#Admin", adminNm)
+                        // SendMail(
+                        //   user.email,
+                        //   teacherAddedSub.replace("#Insti", insNm),
+                        //   teacherAddedBody
+                        //     .replace("#Insti", insNm)
+                        //     .replace("#Admin", adminNm)
+                        // );
+                        fcm.sendNotification(
+                          user._id,
+                          "Added to " + insNm,
+                          "You have been added to institue, " +
+                            insNm +
+                            " by " +
+                            insNm,
+                          "N0001"
                         );
                         res.status(200).json({
                           flag: 1,
@@ -2091,6 +2157,12 @@ router.post("/removeteachers", (req, res) => {
           console.log(err);
         });
 
+        fcm.sendNotification(
+          tId,
+          "Removed from Institute",
+          "You have been removed from the Institute.",
+          "N0005"
+        );
         res.json({ flag: 1, msg: "Teacher have been successfully removed" });
       }
     }

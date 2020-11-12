@@ -35,7 +35,7 @@ module.exports.SendMail = (to, subject, body) => {
       service: "gmail",
       auth: {
         user: "noreply.planed@gmail.com",
-        pass: "planEd34194pWQ@419",
+        pass: "14!ieT27AmoEk!#",
       },
     });
 

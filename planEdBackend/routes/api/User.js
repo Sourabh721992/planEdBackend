@@ -23,7 +23,12 @@ const Batch = require("../../models/Batch");
 const Admin = require("../../models/Admin");
 const LiveSession = require("../../models/LiveSession");
 const redis = require("../../common/RedisLayer");
-const { ParentDashboardData } = require("../../config/keys");
+const {
+  RedisKeyParentDashboardData,
+  RedisKeyAdminDashboardData,
+  RedisKeyTeacherDashboardData,
+  RedisKeyTeacherVerifyStudent,
+} = require("../../config/keys");
 const {
   registrationOtpBody,
   registrationOtpSub,
@@ -365,10 +370,9 @@ router.post("/parents/ins", (req, res) => {
   //Get parent Dashboard data from redis
   redis.FetchHashSetFields(
     "redisClient6001",
-    ParentDashboardData.replace("insId", req.body.insId),
+    RedisKeyParentDashboardData.replace("insId", req.body.insId),
     req.body.pId,
     function (studentInfo) {
-      consoel.log(JSON > parse(studentInfo));
       res.status(200).json({
         flag: 1,
         data: JSON.parse(studentInfo),
@@ -1303,36 +1307,50 @@ const GetStudentDashboardData = (studentDetails) => {
 };
 //Function will be used to fetch the dasboard data of admin
 //and send the same to him
+
 const GetAdminDashboardData = (adminDetails, insId = "-1") => {
   try {
     return new Promise((resolve, reject) => {
-      return resolve({
-        flag: 1,
-        aId: adminDetails._id,
-        data: {
-          insId: "5e44485bc5f9613d060ae74b",
-          insNm: "Institute 1",
-          aId: "5e4445dac5f9613d060ae714",
-          aNm: "Admin 1",
-          feeCenter: {
-            week: [20000, 22000, 10],
-            month: [80000, 88000, 10],
-            quarter: [240000, 264000, 10],
-          },
-          studentCenter: {
-            week: [10, 11, 10],
-            month: [40, 44, 10],
-            quarter: [120, 132, 10],
-          },
-          fee: {
-            submit: 20,
-            due: 10,
-            input: 5,
-          },
-          pendingActions: 10,
-          revenue: [80000, 70000, 90000, 70000, 90000],
-        },
-      });
+      redis.FetchHashSetFields(
+        "redisClient6001",
+        RedisKeyAdminDashboardData.replace("insId", insId),
+        String(adminDetails._id),
+        function (adminData) {
+          let data = JSON.parse(adminData);
+          return resolve({
+            flag: 1,
+            aId: adminDetails._id,
+            data: data,
+          });
+        }
+      );
+      // return resolve({
+      //   flag: 1,
+      //   aId: adminDetails._id,
+      //   data: {
+      //     insId: "5e44485bc5f9613d060ae74b",
+      //     insNm: "Institute 1",
+      //     aId: "5e4445dac5f9613d060ae714",
+      //     aNm: "Admin 1",
+      //     feeCenter: {
+      //       week: [20000, 22000, 10],
+      //       month: [80000, 88000, 10],
+      //       quarter: [240000, 264000, 10],
+      //     },
+      //     studentCenter: {
+      //       week: [10, 11, 10],
+      //       month: [40, 44, 10],
+      //       quarter: [120, 132, 10],
+      //     },
+      //     fee: {
+      //       submit: 20,
+      //       due: 10,
+      //       input: 5,
+      //     },
+      //     pendingActions: 10,
+      //     revenue: [80000, 70000, 90000, 70000, 90000],
+      //   },
+      // });
     });
   } catch (err) {
     console.log(err);
@@ -1344,29 +1362,66 @@ const GetAdminDashboardData = (adminDetails, insId = "-1") => {
 const GetTeacherDashboardData = (teacherDetails, insId = "-1") => {
   try {
     return new Promise((resolve, reject) => {
-      return resolve({
-        flag: 1,
-        tId: teacherDetails._id,
-        data: {
-          insId: "5e44485bc5f9613d060ae74b",
-          insNm: "Institute 1",
-          tId: "5e444a5937d6f12430533cf5",
-          tNm: "Teacher 1",
-          stdntCnt: 190,
-          verficationRqsts: 43,
-          msgFrmPrnt: 1,
-          graph1: [
-            {
-              year: 2019,
-              data: [-1, -1, -1, 130, 120, 160, 160, 160, 170, 180, 190],
-            },
-            {
-              year: 2020,
-              data: [80, 100, 120, 130, 120, 160, 160, 160, 170, 180, 190],
-            },
-          ],
-        },
-      });
+      redis.FetchHashSetFields(
+        "redisClient6001",
+        RedisKeyTeacherDashboardData.replace("insId", insId),
+        String(teacherDetails._id),
+        function (teacherData) {
+          let data = JSON.parse(teacherData);
+
+          redis.HashSetFieldExistOrNot(
+            "redisClient6001",
+            RedisKeyTeacherVerifyStudent,
+            String(teacherDetails._id),
+            function (exist) {
+              if (exist) {
+                redis.FetchHashSetFields(
+                  "redisClient6001",
+                  RedisKeyTeacherVerifyStudent,
+                  String(teacherDetails._id),
+                  function (noOfStudents) {
+                    data.verficationRqsts = Number(JSON.parse(noOfStudents));
+                    return resolve({
+                      flag: 1,
+                      tId: teacherDetails._id,
+                      data: data,
+                    });
+                  }
+                );
+              } else {
+                return resolve({
+                  flag: 1,
+                  tId: teacherDetails._id,
+                  data: data,
+                });
+              }
+            }
+          );
+        }
+      );
+      // return resolve({
+      //   flag: 1,
+      //   tId: teacherDetails._id,
+      //   data: {
+      //     insId: "5e44485bc5f9613d060ae74b",
+      //     insNm: "Institute 1",
+      //     tId: "5e444a5937d6f12430533cf5",
+      //     tNm: "Teacher 1",
+      //     stdntCnt: 190,
+      //     verficationRqsts: 43,
+      //     msgFrmPrnt: 1,
+      //     graph1: [
+      //       {
+      //         year: 2019,
+      //         data: [-1, -1, -1, 130, 120, 160, 160, 160, 170, 180, 190],
+      //       },
+      //       {
+      //         year: 2020,
+      //         data: [80, 100, 120, 130, 120, 160, 160, 160, 170, 180, 190],
+      //       },
+      //     ],
+      //   },
+      // });
     });
   } catch (err) {
     console.log(err);

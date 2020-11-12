@@ -27,7 +27,12 @@ const UpdatedBatchTimings = require("../../models/UpdatedBatchTimings");
 const BatchWiseMessage = require("../../models/BatchWiseMessage");
 const LiveSession = require("../../models/LiveSession");
 const LastAttendedClass = require("../../models/LastAttendedClass");
-
+const fcm = require("../../common/Fcm");
+const redis = require("../../common/RedisLayer");
+const {
+  RedisKeyTeacherVerifyStudent,
+  RedisKeyStudentParentMapping,
+} = require("../../config/keys");
 const {
   studentAddedToBatchSub,
   studentAddedToBatchBody,
@@ -36,7 +41,7 @@ const {
 } = require("../../common/EmailTemplate");
 
 //Map with key student Id and value will be its attendance data for that year
-var mapStudent = {};
+var mapStudentAttendanceDetails = {};
 
 var mapStudentTestDetails = {};
 
@@ -159,7 +164,8 @@ router.post("/attendance", (req, res) => {
   //in a one go and will be using these details to update attendance info
   let arrStudentIds = [];
   students.map((s) => {
-    if (typeof mapStudent[s.sId] == "undefined") arrStudentIds.push(s.sId);
+    if (typeof mapStudentAttendanceDetails[s.sId] == "undefined")
+      arrStudentIds.push(s.sId);
   });
 
   //1. Feeds the student information in the database and maintain state in the local machine --start
@@ -169,10 +175,14 @@ router.post("/attendance", (req, res) => {
     year: year,
     sId: { $in: arrStudentIds },
   })
+    .populate("sId", "nm -_id")
+    .populate("insId", "nm -_id")
     .then((studentAttendanceDetails) => {
       if (studentAttendanceDetails.length > 0)
         //Creating the map here
-        studentAttendanceDetails.map((s) => (mapStudent[s.sId] = s));
+        studentAttendanceDetails.map(
+          (s) => (mapStudentAttendanceDetails[s.sId] = s)
+        );
 
       let bulk = StudentWiseAttendance.collection.initializeUnorderedBulkOp();
       let bulkLastAttendedClass = LastAttendedClass.collection.initializeUnorderedBulkOp();
@@ -180,7 +190,9 @@ router.post("/attendance", (req, res) => {
       for (let s = 0; s < students.length; s++) {
         //No attendance entry for institute, year exist for this student.
         //So we need to add. This is the new student
-        if (typeof mapStudent[students[s].sId] == "undefined") {
+        if (
+          typeof mapStudentAttendanceDetails[students[s].sId] == "undefined"
+        ) {
           let arrMonth = [];
           let arrDay = [];
           while (arrDay.length < day) {
@@ -207,13 +219,19 @@ router.post("/attendance", (req, res) => {
           //Check whether the attendance info is for existing batch
           //or new batch
           let batchIdFound = false;
-          for (let b = 0; b < mapStudent[students[s].sId].bIds.length; b++) {
+          for (
+            let b = 0;
+            b < mapStudentAttendanceDetails[students[s].sId].bIds.length;
+            b++
+          ) {
             //When the  batch exist in the system.
-            if (bId == mapStudent[students[s].sId].bIds[b].bId) {
+            if (
+              bId == mapStudentAttendanceDetails[students[s].sId].bIds[b].bId
+            ) {
               //Suggests attendance information for new month
               if (
-                typeof mapStudent[students[s].sId].bIds[b].month[month] ==
-                "undefined"
+                typeof mapStudentAttendanceDetails[students[s].sId].bIds[b]
+                  .month[month] == "undefined"
               ) {
                 let arrDay = [];
                 while (arrDay.length < day) {
@@ -221,26 +239,37 @@ router.post("/attendance", (req, res) => {
                 }
                 arrDay[day] = students[s].a;
                 while (
-                  mapStudent[students[s].sId].bIds[b].month.length < month
+                  mapStudentAttendanceDetails[students[s].sId].bIds[b].month
+                    .length < month
                 ) {
-                  mapStudent[students[s].sId].bIds[b].month.push({});
+                  mapStudentAttendanceDetails[students[s].sId].bIds[
+                    b
+                  ].month.push({});
                 }
-                mapStudent[students[s].sId].bIds[b].month[month] = {
+                mapStudentAttendanceDetails[students[s].sId].bIds[b].month[
+                  month
+                ] = {
                   count: 1,
                   day: arrDay,
                 };
               }
               //Entry for same month
               else {
-                mapStudent[students[s].sId].bIds[b].month[month].count += 1;
+                mapStudentAttendanceDetails[students[s].sId].bIds[b].month[
+                  month
+                ].count += 1;
                 while (
-                  mapStudent[students[s].sId].bIds[b].month[month].day.length <
-                  day
+                  mapStudentAttendanceDetails[students[s].sId].bIds[b].month[
+                    month
+                  ].day.length < day
                 ) {
-                  mapStudent[students[s].sId].bIds[b].month[month].day.push(-1);
+                  mapStudentAttendanceDetails[students[s].sId].bIds[b].month[
+                    month
+                  ].day.push(-1);
                 }
-                mapStudent[students[s].sId].bIds[b].month[month].day[day] =
-                  students[s].a;
+                mapStudentAttendanceDetails[students[s].sId].bIds[b].month[
+                  month
+                ].day[day] = students[s].a;
               }
               batchIdFound = true;
               break;
@@ -261,7 +290,7 @@ router.post("/attendance", (req, res) => {
             arrMonth[month] = { count: 1, day: arrDay };
             objbId.bId = bId;
             objbId.month = arrMonth;
-            mapStudent[students[s].sId].bIds.push(objbId);
+            mapStudentAttendanceDetails[students[s].sId].bIds.push(objbId);
           }
 
           bulk
@@ -271,7 +300,7 @@ router.post("/attendance", (req, res) => {
               year: Number(year),
             })
             .updateOne({
-              $set: { bIds: mapStudent[students[s].sId].bIds },
+              $set: { bIds: mapStudentAttendanceDetails[students[s].sId].bIds },
             });
           executeBulk = true;
         }
@@ -287,6 +316,48 @@ router.post("/attendance", (req, res) => {
             });
           });
         }
+
+        //Send notification to parent informing him about his student.
+        redis.HashSetFieldExistOrNot(
+          "redisClient6001",
+          RedisKeyStudentParentMapping,
+          String(students[s].sId),
+          function (exist) {
+            if (exist) {
+              //Get the parent Id
+              redis.FetchHashSetFields("redisClient6001"),
+                RedisKeyStudentParentMapping,
+                String(students[s].sId),
+                function (pId) {
+                  if (students[s].a == 1) {
+                    //Present Notification
+                    fcm.sendNotification(
+                      String(JSON.parse(pId)),
+                      "Present in Class",
+                      mapStudentAttendanceDetails[students[s].sId].sId.nm +
+                        " is attending class in " +
+                        mapStudentAttendanceDetails[students[s].sId].insId.nm +
+                        " at " +
+                        timings,
+                      "N0013"
+                    );
+                  } else {
+                    //Absent Notification
+                    fcm.sendNotification(
+                      String(JSON.parse(pId)),
+                      "Absent in Class",
+                      mapStudentAttendanceDetails[students[s].sId].sId.nm +
+                        " is absent for class in " +
+                        mapStudentAttendanceDetails[students[s].sId].insId.nm +
+                        " at " +
+                        timings,
+                      "N0014"
+                    );
+                  }
+                };
+            }
+          }
+        );
       }
 
       if (executeBulk) {
@@ -604,6 +675,7 @@ router.post("/approvestudents", (req, res) => {
           .populate("sId", "cNo nm ")
           .populate("pId", "cNo email")
           .populate("bId", "nm sub")
+          .populate("insId", "admin")
           .then((deleted) => {
             //Send the mail to the student informing him that his account is created and that he can login
             //to the account
@@ -648,27 +720,87 @@ router.post("/approvestudents", (req, res) => {
               inputStudentFees.save().catch((err) => {
                 console.log(err);
               });
+
+              fcm.sendNotification(
+                String(deleted.pId._id),
+                "Student Verified",
+                "Request to add student in institute, " +
+                  insNm +
+                  " has been approved ",
+                "N0010"
+              );
+
+              //Send notification to admin, telling him to input student fees
+              fcm.sendNotification(
+                String(deleted.insId.admin[0]),
+                "Input Student Fees",
+                "Student has been added in " +
+                  insNm +
+                  " in batch, " +
+                  deleted.bId.nm +
+                  ". Request you to enter student fees plan.",
+                "N0012"
+              );
+
+              //Send notification to parent informing him about that his student request got approved
             } else if (confirmed == -1) {
               //When confirmed = -1, means teacher has rejected the student,
               //send parent the message that your student has been rejected by parent
-              SendMail(
-                deleted.pId.email,
-                studentRejectedByTeacherSub
-                  .replace("#Insti", insNm)
-                  .replace(
-                    "#Batch",
-                    deleted.bId.nm + " - " + deleted.bId.sub.join(", ")
-                  ),
-                studentRejectedByTeacherBody
-                  .replace("#Student", deleted.sId.nm)
-                  .replace("#Insti", insNm)
-                  .replace(
-                    "#Batch",
-                    deleted.bId.nm + " - " + deleted.bId.sub.join(", ")
-                  )
+
+              fcm.sendNotification(
+                String(deleted.pId._id),
+                "Student Rejected",
+                "Request to add student in institute, " +
+                  insNm +
+                  " has been rejected. Request you to contact administrator.",
+                "N0011"
               );
+
+              // SendMail(
+              //   deleted.pId.email,
+              //   studentRejectedByTeacherSub
+              //     .replace("#Insti", insNm)
+              //     .replace(
+              //       "#Batch",
+              //       deleted.bId.nm + " - " + deleted.bId.sub.join(", ")
+              //     ),
+              //   studentRejectedByTeacherBody
+              //     .replace("#Student", deleted.sId.nm)
+              //     .replace("#Insti", insNm)
+              //     .replace(
+              //       "#Batch",
+              //       deleted.bId.nm + " - " + deleted.bId.sub.join(", ")
+              //     )
+              // );
             }
 
+            //Decrease the number of approved student by 1
+            //Set the number of approve student field for tId in redis
+            redis.HashSetFieldExistOrNot(
+              "redisClient6001",
+              RedisKeyTeacherVerifyStudent,
+              String(deleted.tId),
+              function (exist) {
+                if (exist) {
+                  redis.FetchHashSetFields(
+                    "redisClient6001",
+                    RedisKeyTeacherVerifyStudent,
+                    String(deleted.tId),
+                    function (noOfStudents) {
+                      let newNumberOfStudents =
+                        Number(JSON.parse(noOfStudents)) - 1;
+                      redis.SetHashSetInRedis(
+                        "redisClient6001",
+                        RedisKeyTeacherVerifyStudent,
+                        String(deleted.tId),
+                        String(newNumberOfStudents),
+                        function (res) {}
+                      );
+                    }
+                  );
+                }
+              }
+            );
             if (numberOfStudentsExecuted == arrStudents.length) {
               res.status(200).json({
                 flag: 1,

@@ -226,7 +226,7 @@ module.exports.DeregisterForNotification = (uId, platform, fcmId) => {
   }
 };
 
-module.exports.sendNotification = (uId, title, body) => {
+module.exports.sendNotification = (uId, title, body, code) => {
   //Get the fcmIds registered for the user
   if (typeof hashUserFcmIdsMapping.get(String(uId)) != "undefined") {
     let fcmIds = hashUserFcmIdsMapping.get(String(uId));
@@ -242,6 +242,7 @@ module.exports.sendNotification = (uId, title, body) => {
     let obj = {};
     obj.dt = dt;
     obj.body = body;
+    onj.code = code;
 
     const message = {
       data: { title: title, body: JSON.stringify(obj) },

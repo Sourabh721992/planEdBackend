@@ -11,6 +11,7 @@ const BatchWiseMessage = require("../../models/BatchWiseMessage");
 const LiveSession = require("../../models/LiveSession");
 const Query = require("../../models/Query");
 const Admin = require("../../models/Admin");
+const Teacher = require("../../models/Teacher");
 
 //The API will send the institute registered with our system.
 router.post("/insti", (req, res) => {
@@ -598,7 +599,7 @@ router.post("/downloadcontent", (req, res) => {
 
 //The API will be used to check respective profiles of the user
 router.post("/profile", (req, res) => {
-  let { uId, role } = req.body;
+  let { uId, role, insId, insNm } = req.body;
   if (role == "a") {
     //Load Admin Profile
     Admin.findOne({ aId: uId })
@@ -625,6 +626,36 @@ router.post("/profile", (req, res) => {
             flag: 1,
             data: adminObject,
           });
+        });
+      });
+  } else if (role == "t") {
+    Teacher.findOne({ tId: uId })
+      .populate("tId", "nm cNo email addrs cDt -_id")
+      .populate("insti.bIds.bId", "student -_id")
+      .then((teacherDetails) => {
+        let teacherObject = {};
+        teacherObject["nm"] = teacherDetails.tId.nm;
+        teacherObject["cNo"] = teacherDetails.tId.cNo;
+        teacherObject["email"] = teacherDetails.tId.email;
+        teacherObject["addrs"] = teacherDetails.tId.addrs;
+        teacherObject["insNm"] = insNm;
+        teacherObject["sCnt"] = 0;
+
+        for (let t = 0; t < teacherDetails.insti.length; t++) {
+          if (insId == teacherDetails.insti[t].insId) {
+            teacherObject["bCnt"] = teacherDetails.insti[t].bIds.length; //Teacher batch count
+            teacherObject["subject"] = teacherDetails.insti[t].sub;
+
+            for (let b = 0; b < teacherDetails.insti[t].bIds.length; b++) {
+              teacherObject["sCnt"] +=
+                teacherDetails.insti[t].bIds[b].bId.student.length;
+            }
+          }
+        }
+
+        res.json({
+          flag: 1,
+          data: teacherObject,
         });
       });
   }

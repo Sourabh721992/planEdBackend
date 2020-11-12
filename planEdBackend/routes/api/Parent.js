@@ -8,13 +8,15 @@ const ApproveStudents = require("../../models/ApproveStudents");
 const ValidateStudentFees = require("../../models/ValidateStudentFees");
 const StudentWiseAttendance = require("../../models/StudentWiseAttendance");
 const Batch = require("../../models/Batch");
-const { GenerateRandomPwd, SendMail } = require("../../common/Common");
-const { isEmpty } = require("../../validations/is-empty");
+const { GenerateRandomPwd } = require("../../common/Common");
 const fees = require("../../common/Fees");
+const fcm = require("../../common/Fcm");
+const redis = require("../../common/RedisLayer");
 const {
   accountCreatedSub,
   accountCreatedBody,
 } = require("../../common/EmailTemplate");
+const { RedisKeyTeacherVerifyStudent } = require("../../config/keys");
 
 //The API will be used to add student details in the system.
 //Will send the dashboard data to the stakeholders.
@@ -78,18 +80,78 @@ router.post("/addstudent", (req, res) => {
               //The below logic was return to enter the students that are not confirmed
               //in the database, so that teacher can fetch the same in one go -- start
               let institute = JSON.parse(req.body.insti);
+              let sName = req.body.nm;
               for (let i = 0; i < institute.length; i++) {
                 for (let b = 0; b < institute[i].bIds.length; b++) {
-                  let approveStudents = new ApproveStudents({
-                    sId: user._id,
-                    pId: req.body.pId,
-                    insId: institute[i].insId,
-                    bId: institute[i].bIds[b].bId,
-                    dt: Math.trunc(Date.now() / 1000),
-                  });
+                  //Fetch the tId of the batch
+                  Batch.findOne(
+                    { _id: institute[i].bIds[b].bId },
+                    "teacher nm -_id"
+                  ).then((batch) => {
+                    let approveStudents = new ApproveStudents({
+                      sId: user._id,
+                      pId: req.body.pId,
+                      insId: institute[i].insId,
+                      bId: institute[i].bIds[b].bId,
+                      tId: batch.teacher,
+                      dt: Math.trunc(Date.now() / 1000),
+                    });
 
-                  approveStudents.save().catch((err) => {
-                    console.log(err);
+                    approveStudents.save().catch((err) => {
+                      console.log(err);
+                    });
+
+                    //Shoot notification to teacher informing her to verify student
+                    fcm.sendNotification(
+                      batch.teacher,
+                      "Verify Student",
+                      "Request you to verify student, " +
+                        sName +
+                        " added in batch, " +
+                        batch.nm,
+                      "N0009"
+                    );
+
+                    //Set the number of approve student field for tId in redis
+                    redis.HashSetFieldExistOrNot(
+                      "redisClient6001",
+                      RedisKeyTeacherVerifyStudent,
+                      String(batch.teacher),
+                      function (exist) {
+                        if (exist) {
+                          redis.FetchHashSetFields(
+                            "redisClient6001",
+                            RedisKeyTeacherVerifyStudent,
+                            String(batch.teacher),
+                            function (noOfStudents) {
+                              let newNumberOfStudents =
+                                Number(JSON.parse(noOfStudents)) + 1;
+                              redis.SetHashSetInRedis(
+                                "redisClient6001",
+                                RedisKeyTeacherVerifyStudent,
+                                String(batch.teacher),
+                                String(newNumberOfStudents),
+                                function (res) {}
+                              );
+                            }
+                          );
+                        } else {
+                          ApproveStudents.find({
+                            tId: mongoose.Types.ObjectId(batch.teacher),
+                          })
+                            .count()
+                            .then((noOfStudents) => {
+                              redis.SetHashSetInRedis(
+                                "redisClient6001",
+                                RedisKeyTeacherVerifyStudent,
+                                String(batch.teacher),
+                                String(noOfStudents),
+                                function (res) {}
+                              );
+                            });
+                        }
+                      }
+                    );
                   });
                 }
               }
