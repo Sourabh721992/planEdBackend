@@ -10,7 +10,7 @@ const UserFcmSchema = new Schema({
   },
   regIds: [
     {
-      imei: { type: String, required: true },
+      imei: { type: String },
       fcmId: { type: String, required: true },
       platform: { type: String, required: true },
       version: { type: String, required: true },

@@ -163,6 +163,7 @@ router.post("/attendance", (req, res) => {
   //to query studentwiseattendance collection for all students
   //in a one go and will be using these details to update attendance info
   let arrStudentIds = [];
+  let arrClassAttendedStudentIds = [];
   students.map((s) => {
     if (typeof mapStudentAttendanceDetails[s.sId] == "undefined")
       arrStudentIds.push(s.sId);
@@ -178,11 +179,12 @@ router.post("/attendance", (req, res) => {
     .populate("sId", "nm -_id")
     .populate("insId", "nm -_id")
     .then((studentAttendanceDetails) => {
-      if (studentAttendanceDetails.length > 0)
+      if (studentAttendanceDetails.length > 0) {
         //Creating the map here
-        studentAttendanceDetails.map(
-          (s) => (mapStudentAttendanceDetails[s.sId] = s)
-        );
+        studentAttendanceDetails.map((s) => {
+          mapStudentAttendanceDetails[s.sId] = s;
+        });
+      }
 
       let bulk = StudentWiseAttendance.collection.initializeUnorderedBulkOp();
       let bulkLastAttendedClass = LastAttendedClass.collection.initializeUnorderedBulkOp();
@@ -307,6 +309,7 @@ router.post("/attendance", (req, res) => {
 
         //Record the last attended class of the student
         if (students[s].a == 1) {
+          arrClassAttendedStudentIds.push(students[s].sId);
           GetCurrentDate().then((dt) => {
             bulkLastAttendedClass.insert({
               insId: insId,
@@ -325,36 +328,50 @@ router.post("/attendance", (req, res) => {
           function (exist) {
             if (exist) {
               //Get the parent Id
-              redis.FetchHashSetFields("redisClient6001"),
+              redis.FetchHashSetFields(
+                "redisClient6001",
                 RedisKeyStudentParentMapping,
                 String(students[s].sId),
                 function (pId) {
                   if (students[s].a == 1) {
-                    //Present Notification
-                    fcm.sendNotification(
-                      String(JSON.parse(pId)),
-                      "Present in Class",
-                      mapStudentAttendanceDetails[students[s].sId].sId.nm +
-                        " is attending class in " +
-                        mapStudentAttendanceDetails[students[s].sId].insId.nm +
-                        " at " +
-                        timings,
-                      "N0013"
-                    );
+                    if (
+                      typeof mapStudentAttendanceDetails[students[s].sId] !=
+                      "undefined"
+                    ) {
+                      //Present Notification
+                      fcm.sendNotification(
+                        String(pId),
+                        "Present in Class",
+                        mapStudentAttendanceDetails[students[s].sId].sId.nm +
+                          " is attending class in " +
+                          mapStudentAttendanceDetails[students[s].sId].insId
+                            .nm +
+                          " at " +
+                          timings,
+                        "N0013"
+                      );
+                    }
                   } else {
-                    //Absent Notification
-                    fcm.sendNotification(
-                      String(JSON.parse(pId)),
-                      "Absent in Class",
-                      mapStudentAttendanceDetails[students[s].sId].sId.nm +
-                        " is absent for class in " +
-                        mapStudentAttendanceDetails[students[s].sId].insId.nm +
-                        " at " +
-                        timings,
-                      "N0014"
-                    );
+                    if (
+                      typeof mapStudentAttendanceDetails[students[s].sId] !=
+                      "undefined"
+                    ) {
+                      //Absent Notification
+                      fcm.sendNotification(
+                        String(pId),
+                        "Absent in Class",
+                        mapStudentAttendanceDetails[students[s].sId].sId.nm +
+                          " is absent for class in " +
+                          mapStudentAttendanceDetails[students[s].sId].insId
+                            .nm +
+                          " at " +
+                          timings,
+                        "N0014"
+                      );
+                    }
                   }
-                };
+                }
+              );
             }
           }
         );
@@ -377,7 +394,7 @@ router.post("/attendance", (req, res) => {
 
       LastAttendedClass.deleteMany({
         insId: insId,
-        sId: { $in: arrStudentIds },
+        sId: { $in: arrClassAttendedStudentIds },
       }).then((response) => {
         bulkLastAttendedClass.execute().catch((err) => {
           console.log(err);
@@ -656,10 +673,12 @@ router.post("/approvestudents", (req, res) => {
 
     //Update the status in student collection as per the input from teacher
     Student.update(
-      {},
+      { sId: sId },
       {
-        $set: { "insti.$[i].bIds.$[b].confirmed": confirmed },
-        $set: { "insti.$[i].bIds.$[b].joinBatchDt": batchDt },
+        $set: {
+          "insti.$[i].bIds.$[b].confirmed": confirmed,
+          "insti.$[i].bIds.$[b].joinBatchDt": batchDt,
+        },
       },
       {
         arrayFilters: [
@@ -1145,6 +1164,7 @@ router.post("/broadcast", (req, res) => {
   let tNm = req.body.tNm;
   let tId = req.body.tId;
   let insNm = req.body.insNm;
+
   if ("sIds" in req.body) {
     sIds = JSON.parse(req.body.sIds);
   }
@@ -1177,6 +1197,38 @@ router.post("/broadcast", (req, res) => {
     )
       .populate("student", "cNo email")
       .then((arrStudents) => {
+        for (let b = 0; b < arrStudents.length; b++) {
+          //Inside Batch array
+          for (let s = 0; s < arrStudents[b].student.length; s++) {
+            let sId = String(arrStudents[b].student[s]._id);
+            //Inside Student Array
+            //Send notification to parent informing him about his student.
+            redis.HashSetFieldExistOrNot(
+              "redisClient6001",
+              RedisKeyStudentParentMapping,
+              sId,
+              function (exist) {
+                if (exist) {
+                  //Get the parent Id
+                  redis.FetchHashSetFields(
+                    "redisClient6001",
+                    RedisKeyStudentParentMapping,
+                    sId,
+                    function (pId) {
+                      //Present Notification
+                      fcm.sendNotification(
+                        String(pId),
+                        "Urgent Message",
+                        msg,
+                        "N0016"
+                      );
+                    }
+                  );
+                }
+              }
+            );
+          }
+        }
         res.status(200).json({
           flag: 1,
           msg: "Appropriate person(s) have been informed.",
@@ -1224,47 +1276,89 @@ router.post("/reschedulebatch", (req, res) => {
         //In the arrUserIds, we have admin, parent and student Ids, now we can find
         //Emails and contact number and now we can send mail, informing about batch change
         //timings
-        User.find(
-          {
-            _id: { $in: arrUserIds },
-          },
-          "cNo email role -_id"
-        ).then((response) => {
-          //Use response to send mail to stakeholders, informing them about the timing change
-          //Insert in UpdatedBatchTimingsSchema so that we can keep a log and also on dashboard,
-          //show the same thing to parent.
-          const updatedBatchTimings = new UpdatedBatchTimings({
-            bId: bId,
-            timings: timings,
-            tId: tId,
-            clsDt: clsDt,
-            extraCls: extraCls,
-            cDt: Math.trunc(new Date().getTime() / 1000),
-          });
-
-          updatedBatchTimings.save().catch((err) => {
-            console.log(err);
-          });
-
-          //Update the timings in the batch as well.
-          Batch.updateOne(
-            { _id: bId },
-            {
-              $set: {
-                updatedTimings: timings,
-                updatedDt: clsDt,
-                extraCls: extraCls,
-              },
-            },
-            {}
-          ).catch((err) => {
-            console.log(err);
-          });
-          res.status(200).json({
-            flag: 1,
-            msg: "Timings updated successfully for the next class.",
-          });
+        // User.find(
+        //   {
+        //     _id: { $in: arrUserIds },
+        //   },
+        //   "cNo email role -_id"
+        // ).then((response) => {
+        //Use response to send mail to stakeholders, informing them about the timing change
+        //Insert in UpdatedBatchTimingsSchema so that we can keep a log and also on dashboard,
+        //show the same thing to parent.
+        const updatedBatchTimings = new UpdatedBatchTimings({
+          bId: bId,
+          timings: timings,
+          tId: tId,
+          clsDt: clsDt,
+          extraCls: extraCls,
+          cDt: Math.trunc(new Date().getTime() / 1000),
         });
+
+        updatedBatchTimings.save().catch((err) => {
+          console.log(err);
+        });
+
+        //Update the timings in the batch as well.
+        Batch.updateOne(
+          { _id: bId },
+          {
+            $set: {
+              updatedTimings: timings,
+              updatedDt: clsDt,
+              extraCls: extraCls,
+            },
+          },
+          {}
+        ).catch((err) => {
+          console.log(err);
+        });
+
+        //Send notification to users, informing them about the next class
+        for (let a = 0; a < arrUserIds.length; a++) {
+          let dt = new Date(0); // The 0 there is the key, which sets the date to the epoch
+          dt.setSeconds(clsDt);
+          let strDt =
+            dt.getDate().toString() +
+            "-" +
+            (dt.getMonth() + 1).toString() +
+            "-" +
+            dt.getFullYear().toString();
+          let uId = String(arrUserIds[a]);
+          if (String(extraCls) == "true") {
+            fcm.sendNotification(
+              uId,
+              "Extra Class",
+              "Teacher, " +
+                tNm +
+                " has scheduled extra class for batch, " +
+                bNm +
+                " on " +
+                strDt +
+                " at " +
+                timings,
+              "N0017"
+            );
+          } else {
+            fcm.sendNotification(
+              uId,
+              "Next Class Rescheduled",
+              "Teacher, " +
+                tNm +
+                " has rescheduled next class for batch, " +
+                bNm +
+                " on " +
+                strDt +
+                " at " +
+                timings,
+              "N0018"
+            );
+          }
+        }
+        res.status(200).json({
+          flag: 1,
+          msg: "Timings updated successfully for the next class.",
+        });
+        // });
       });
     })
     .catch((err) => {

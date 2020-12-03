@@ -242,21 +242,23 @@ module.exports.sendNotification = (uId, title, body, code) => {
     let obj = {};
     obj.dt = dt;
     obj.body = body;
-    onj.code = code;
+    obj.code = code;
 
-    const message = {
-      data: { title: title, body: JSON.stringify(obj) },
-      tokens: arrAndroidRegIds,
-    };
-    fcmAdmin
-      .messaging()
-      .sendMulticast(message)
-      .then((send) => {
-        console.log(send);
-      })
-      .catch((err) => {
-        console.log(err);
-      });
+    if (arrAndroidRegIds.length > 0) {
+      const message = {
+        data: { title: title, body: JSON.stringify(obj) },
+        tokens: arrAndroidRegIds,
+      };
+      fcmAdmin
+        .messaging()
+        .sendMulticast(message)
+        .then((send) => {
+          //console.log(send);
+        })
+        .catch((err) => {
+          console.log(err);
+        });
+    }
   }
 };
 

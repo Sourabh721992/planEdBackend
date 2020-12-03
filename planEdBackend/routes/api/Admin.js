@@ -2522,25 +2522,34 @@ router.post("/approvefeeinfo", (req, res) => {
     discount,
     scholarship,
     fine,
-    totalFee,
+    totalfee,
     paidDt,
     paidMethod,
     isPaid,
     dueDt,
     txnId,
-    epochDueDt,
+    adminNm,
+    sNm,
+    insNm,
   } = req.body;
 
   let sts = 1;
 
   let epochPaidDt = paidDt;
+  let epochDueDt = dueDt;
+
+  let paidDtInDDMMYYYY = new Date(0);
+  paidDtInDDMMYYYY.setSeconds(paidDt);
+
+  let dueDtInDDMMYYYY = new Date(0);
+  dueDtInDDMMYYYY.setSeconds(dueDt);
 
   if (String(isPaid) == "true") {
     //Admin has received the fee, update the details in the student fee details
     StudentWiseFee.findOneAndUpdate(
       {
         insId: insId,
-        year: Number(dueDt.split("-")[2]),
+        year: Number(dueDtInDDMMYYYY.getFullYear()),
         sId: sId,
       },
       {
@@ -2560,16 +2569,29 @@ router.post("/approvefeeinfo", (req, res) => {
         flag: 1,
         msg: "Fee details updated successfully",
       });
+
+      fcm.sendNotification(
+        pId,
+        "Fees Accepted",
+        sNm +
+          " fees submission request of INR " +
+          totalfee +
+          " has been accepted by institute, " +
+          insNm +
+          "admin",
+        "N0021"
+      );
     });
 
     //Log the received fee infomation in the plcenter, so that admin can see later on
     //while calculating profit and loss.
     AddFeePLCenter(
-      Number(paidDt.split("-")[1]) - 1,
-      Number(String(paidDt.split("-")[2]).split(" ")[0]),
+      Number(paidDtInDDMMYYYY.getMonth()),
+      //Number(String(paidDt.split("-")[2]).split(" ")[0]),
+      Number(paidDtInDDMMYYYY.getFullYear()),
       insId,
       bId,
-      totalFee
+      totalfee
     );
 
     fees.RemoveStudentDueFees(
@@ -2581,7 +2603,7 @@ router.post("/approvefeeinfo", (req, res) => {
       discount,
       scholarship,
       fine,
-      totalFee,
+      totalfee,
       dueDt,
       epochDueDt
     );
@@ -2592,6 +2614,18 @@ router.post("/approvefeeinfo", (req, res) => {
 
     //Change the paidDt in redis and internal DS
     fees.ChangeStudentFeePaidDt(sId, insId, bId, -1, epochDueDt);
+
+    fcm.sendNotification(
+      pId,
+      "Fees Declined",
+      sNm +
+        " fees submission request of INR " +
+        totalfee +
+        " has been rejected by institute, " +
+        insNm +
+        "admin. Request you to get in touch with him.",
+      "N0020"
+    );
 
     res.status(200).json({
       flag: 1,
@@ -2619,7 +2653,7 @@ router.post("/approvefeeinfo", (req, res) => {
     discount,
     scholarship,
     fine,
-    totalFee,
+    totalFee: totalfee,
     dueDt: epochDueDt,
     paidDt: epochPaidDt,
     paidMethod,
@@ -2636,16 +2670,6 @@ router.post("/approvefeeinfo", (req, res) => {
 //The API will be sending the details of students(fees delayed) to admin
 router.post("/getduefeedetails", (req, res) => {
   fees.FetchInstiWiseDueFees(req.body.insId).then((data) => {
-    //convert epoch datetime to dd-mm-yyyy format
-    // data.map((d) => {
-    //   let dt = new Date(Number(d.dueDt) * 1000);
-    //   d.dueDt =
-    //     ("0" + dt.getDate()).slice(-2) +
-    //     "-" +
-    //     ("0" + (dt.getMonth() + 1)).slice(-2) +
-    //     "-" +
-    //     dt.getFullYear();
-    // });
     res.status(200).json({
       flag: 1,
       data: data,
@@ -2665,9 +2689,12 @@ router.post("/approveduefees", (req, res) => {
     discount,
     scholarship,
     fine,
-    totalFee,
+    totalfee,
     dueDt,
     epochDueDt,
+    adminNm,
+    sNm,
+    insNm,
   } = req.body;
 
   let sts = 1;
@@ -2685,7 +2712,7 @@ router.post("/approveduefees", (req, res) => {
         "bIds.$[b].feeInfo.$[f].isPaid": true,
         "bIds.$[b].feeInfo.$[f].txnId": " ",
         "bIds.$[b].feeInfo.$[f].paidDt": epochPaidDt,
-        "bIds.$[b].feeInfo.$[f].paidMethod": "NA",
+        "bIds.$[b].feeInfo.$[f].paidMethod": "Approved by Admin",
       },
     },
     {
@@ -2697,6 +2724,18 @@ router.post("/approveduefees", (req, res) => {
       flag: 1,
       msg: "Fee details updated successfully",
     });
+
+    fcm.sendNotification(
+      pId,
+      "Due Fees Approved",
+      sNm +
+        " due fees of INR " +
+        totalfee +
+        " has been approved by institute, " +
+        insNm +
+        "admin",
+      "N0022"
+    );
   });
 
   fees.RemoveStudentDueFees(
@@ -2708,7 +2747,7 @@ router.post("/approveduefees", (req, res) => {
     discount,
     scholarship,
     fine,
-    totalFee,
+    totalfee,
     dueDt,
     epochDueDt
   );
@@ -2723,10 +2762,10 @@ router.post("/approveduefees", (req, res) => {
     discount,
     scholarship,
     fine,
-    totalFee,
+    totalFee: totalfee,
     dueDt: epochDueDt,
     paidDt: epochPaidDt,
-    paidMethod: "NA",
+    paidMethod: "Approved by Admin",
     isPaid: true,
     txnId: " ",
     sts,
@@ -2744,7 +2783,7 @@ router.post("/approveduefees", (req, res) => {
     new Date().getFullYear(),
     insId,
     bId,
-    totalFee
+    totalfee
   );
 
   //Update the internel Fee DS and DS in redis.

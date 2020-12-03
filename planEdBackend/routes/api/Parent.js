@@ -273,10 +273,14 @@ router.post("/upcomingclass", (req, res) => {
             updatedDt.setSeconds(batches[b].updatedDt);
             let month = updatedDt.getMonth() + 1;
 
-            objTiming["t"] = batches[b].updatedTimings;
+            objTiming["t"] = batches[b].updatedTimings.replace(/ /g, "");
             objTiming["d"] = GetDay(updatedDt.getDay());
             objTiming["dt"] =
-              updatedDt.getDate() + "-" + month + "-" + updatedDt.getFullYear();
+              ("0" + updatedDt.getDate()).slice(-2) +
+              "-" +
+              ("0" + month).slice(-2) +
+              "-" +
+              updatedDt.getFullYear();
             arrTimings.push(objTiming);
           }
 
@@ -298,9 +302,14 @@ router.post("/upcomingclass", (req, res) => {
                 continue;
               }
               let objTiming = {};
-              objTiming["t"] = batches[b].timings[t];
+              objTiming["t"] = batches[b].timings[t].replace(/ /g, "");
               objTiming["d"] = GetDay(t);
-              objTiming["dt"] = day + "-" + month + "-" + year;
+              objTiming["dt"] =
+                ("0" + day).slice(-2) +
+                "-" +
+                ("0" + month).slice(-2) +
+                "-" +
+                year;
               arrTimings.push(objTiming);
               //We are sharing 3 future classes, if length is 3 get out of the loop
               if (arrTimings.length == 3) break;
@@ -325,9 +334,14 @@ router.post("/upcomingclass", (req, res) => {
                   continue;
                 }
                 let objTiming = {};
-                objTiming["t"] = batches[b].timings[t];
+                objTiming["t"] = batches[b].timings[t].replace(/ /g, "");
                 objTiming["d"] = GetDay(t);
-                objTiming["dt"] = day + "-" + month + "-" + year;
+                objTiming["dt"] =
+                  ("0" + day).slice(-2) +
+                  "-" +
+                  ("0" + month).slice(-2) +
+                  "-" +
+                  year;
                 arrTimings.push(objTiming);
                 //We are sharing 3 future classes, if length is 3 get out of the loop
                 if (arrTimings.length == 3) break;
@@ -336,6 +350,16 @@ router.post("/upcomingclass", (req, res) => {
               dayIndex += 1;
             }
           }
+
+          //Sort date array
+          arrTimings.sort(function (a, b) {
+            // Turn your strings into dates, and then subtract them
+            // to get a value that is either negative, positive, or zero.
+            return (
+              new Date(a.dt.replace(/(\d{2})-(\d{2})-(\d{4})/, "$2/$1/$3")) -
+              new Date(b.dt.replace(/(\d{2})-(\d{2})-(\d{4})/, "$2/$1/$3"))
+            );
+          });
 
           batchTimingObj["nm"] =
             batches[b].nm + " - " + batches[b].sub.join(",");
@@ -378,8 +402,12 @@ router.post("/attendance", (req, res) => {
             //check month of fromDate
             let m = fromDt.getMonth();
             let d = fromDt.getDate() - 1;
-            if (typeof response.bIds[b].month[m].day[d] != "undefined") {
-              arrAttendance.push(response.bIds[b].month[m].day[d]);
+            if (typeof response.bIds[b].month[m] != "undefined") {
+              if (typeof response.bIds[b].month[m].day[d] != "undefined") {
+                arrAttendance.push(response.bIds[b].month[m].day[d]);
+              } else {
+                arrAttendance.push(-1);
+              }
             } else {
               arrAttendance.push(-1);
             }
